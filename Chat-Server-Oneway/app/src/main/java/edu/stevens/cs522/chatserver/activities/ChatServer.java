@@ -1,26 +1,19 @@
 /*********************************************************************
 
- Chat server: accept chat messagesAdapter from clients.
+    Chat server: accept chat messages from clients.
+    
+    Sender name and GPS coordinates are encoded
+    in the messages, and stripped off upon receipt.
 
- Sender name and GPS coordinates are encoded
- in the messagesAdapter, and stripped off upon receipt.
+    Copyright (c) 2017 Stevens Institute of Technology
 
- Copyright (c) 2017 Stevens Institute of Technology
-
- **********************************************************************/
+**********************************************************************/
 package edu.stevens.cs522.chatserver.activities;
-
-import java.lang.reflect.Array;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.os.Bundle;
 import android.os.StrictMode;
 import android.util.Log;
@@ -29,62 +22,63 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.ListAdapter;
 import android.widget.ListView;
-import android.widget.SimpleAdapter;
 import android.widget.SimpleCursorAdapter;
-import android.widget.TextView;
+
+import java.net.DatagramPacket;
+import java.net.InetAddress;
+import java.util.Date;
+import java.util.List;
 
 import edu.stevens.cs522.base.DatagramSendReceive;
 import edu.stevens.cs522.chatserver.R;
+import edu.stevens.cs522.chatserver.contracts.MessageContract;
+import edu.stevens.cs522.chatserver.databases.ChatDbAdapter;
 import edu.stevens.cs522.chatserver.entities.Message;
 import edu.stevens.cs522.chatserver.entities.Peer;
 
 public class ChatServer extends Activity implements OnClickListener {
 
-    final static public String TAG = ChatServer.class.getCanonicalName();
-
-    /*
-     * Socket used both for sending and receiving
-     */
-    // private DatagramSocket serverSocket;
+	final static public String TAG = ChatServer.class.getCanonicalName();
+		
+	/*
+	 * Socket used both for sending and receiving
+	 */
     private DatagramSendReceive serverSocket;
+//  private DatagramSocket serverSocket;
+
 
     /*
-     * True as long as we don't get socket errors
-     */
-    private boolean socketOK = true;
-
-    private ArrayList<Peer> peers;
+	 * True as long as we don't get socket errors
+	 */
+	private boolean socketOK = true; 
 
     /*
-     * TODO: Declare a listview for messagesAdapter, and an adapter for displaying messagesAdapter.
+     * UI for displayed received messages
      */
-    ListView listView;
-    ArrayList<String> messages = new ArrayList<>();
-    ArrayList<String> sender = new ArrayList<>();
-    List<Map<String, String>> data = new ArrayList<>();
-    SimpleAdapter simpleAdapter;
+	private ListView messageList;
+
+    private SimpleCursorAdapter messagesAdapter;
+
+    private ChatDbAdapter chatDbAdapter;
+
+    private Button next;
 
     /*
-     * End Todo
+     * Use to configure the app (user name and port)
      */
-
-    Button next;
-
-    /*
-     * Called when the activity is first created.
-     */
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.view_messages);
+    private SharedPreferences settings;
+	
+	/*
+	 * Called when the activity is first created. 
+	 */
+	@Override
+	public void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
 
         /**
-         * Let's be clear, this is a HACK to allow you to do network communication on the view_messages thread.
+         * Let's be clear, this is a HACK to allow you to do network communication on the messages thread.
          * This WILL cause an ANR, and is only provided to simplify the pedagogy.  We will see how to do
          * this right in a future assignment (using a Service managing background threads).
          */
@@ -101,121 +95,120 @@ public class ChatServer extends Activity implements OnClickListener {
 
             serverSocket = new DatagramSendReceive(port);
 
+            Log.i("IP", "Server Address: " + serverSocket.getInetAddress() + " Server Port: " + serverSocket.getPort());
+
         } catch (Exception e) {
             throw new IllegalStateException("Cannot open socket", e);
         }
 
-        // List of peers
-        peers = new ArrayList<Peer>();
+        setContentView(R.layout.messages);
 
-        /*
-         * TODO: Initialize the UI.
-         */
+        // TODO open the database using the database adapter
+        chatDbAdapter = new ChatDbAdapter(this);
+        chatDbAdapter.open();
+        // TODO query the database using the database adapter, and manage the cursor on the messages thread
+        Cursor messageCursor = chatDbAdapter.fetchAllMessages();
+        Log.i("MESSAGECOURSOR", "Getting all messages ...");
+        startManagingCursor(messageCursor);
+        // TODO use SimpleCursorAdapter to display the messages received.
+        String [] from = new String[]{MessageContract.SENDER, MessageContract.MESSAGE_TEXT};
+        int[] to = new int[]{android.R.id.text1, android.R.id.text2};
+        messagesAdapter = new SimpleCursorAdapter(this, android.R.layout.simple_list_item_2, messageCursor, from, to);
+        messageList = (ListView) findViewById(R.id.message_list);
+        messageList.setAdapter(messagesAdapter);
+        // TODO bind the button for "next" to this activity as listener
         next = (Button) findViewById(R.id.next);
         next.setOnClickListener(this);
-
-
-
-        /*
-         * End Todo
-         */
-
-    }
+        chatDbAdapter.close();
+	}
 
     public void onClick(View v) {
+		
+		byte[] receiveData = new byte[1024];
 
-        byte[] receiveData = new byte[1024];
-
-        DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
-
-
-
-        try {
+		DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
 
 
-            serverSocket.receive(receivePacket);
-            Log.d(TAG, "Received a packet");
+		try {
+		    Log.i("RECEIVING", "Start to receive packet ...");
+			serverSocket.receive(receivePacket);
+			Log.i(TAG, "Received a packet");
 
+			InetAddress sourceIPAddress = receivePacket.getAddress();
+			Log.d(TAG, "Source IP Address: " + sourceIPAddress);
+			
+			String msgContents[] = new String(receivePacket.getData(), 0, receivePacket.getLength()).split(":");
 
-            InetAddress sourceIPAddress = receivePacket.getAddress();
-            Log.d(TAG, "Source IP Address: " + sourceIPAddress);
+            Message message = new Message();
+            message.sender = msgContents[0];
+            message.timestamp = new Date();
+            message.messageText = msgContents[1];
 
-            String msgContents[] = new String(receivePacket.getData(), 0, receivePacket.getLength()).split(":");
-            String name = msgContents[0];
-            String message = msgContents[1];
+			Log.d(TAG, "Received from " + message.sender + ": " + message.messageText);
 
-            Log.d(TAG, "Received from " + name + ": " + message);
-
+			/*
+			 * TODO upsert peer and insert message into the database
+			 */
+			chatDbAdapter.open();
+			//chatDbAdapter = new ChatDbAdapter(this);
+            Peer newPeer = new Peer();
+            newPeer.name = msgContents[0];
+            newPeer.timestamp = new Date();
+            newPeer.address = sourceIPAddress;
+            chatDbAdapter.persist(newPeer);
+            chatDbAdapter.persist(message);
+            Cursor messageCursor = chatDbAdapter.fetchAllMessages();
+            String [] from = new String[]{MessageContract.SENDER, MessageContract.MESSAGE_TEXT};
+            int[] to = new int[]{android.R.id.text1, android.R.id.text2};
+            messagesAdapter = new SimpleCursorAdapter(this, android.R.layout.simple_list_item_2, messageCursor, from, to);
+            messageList = (ListView) findViewById(R.id.message_list);
+            messageList.setAdapter(messagesAdapter);
+            chatDbAdapter.close();
             /*
-             * TODO: Add message with sender to the display.
-             */
-            // add into adatper
-
-            simpleAdapter = new SimpleAdapter(this, data,
-                    android.R.layout.simple_list_item_2,
-                    new String[] {"message", "sender"},
-                    new int[] {android.R.id.text1, android.R.id.text2});
-            listView = (ListView) findViewById(R.id.message_list);
-
-
-
-            Map<String, String> map = new HashMap<>();
-            map.put("message", message);
-            map.put("sender", name);
-            data.add(map);
-            listView.setAdapter(simpleAdapter);
-
-            addPeer(new Peer(name, new Date(), sourceIPAddress, 6666));
-            /*
-             * End Todo
+             * End TODO
              */
 
-        } catch (Exception e) {
+            messagesAdapter.notifyDataSetChanged();
 
-            Log.e(TAG, "Problems receiving packet: " + e.getMessage());
-            socketOK = false;
-        }
+		} catch (Exception e) {
+			
+			Log.e(TAG, "Problems receiving packet: " + e.getMessage(), e);
+			socketOK = false;
+		} 
 
-    }
+	}
 
-    /*
-     * Close the socket before exiting application
-     */
-    public void closeSocket() {
-        if (serverSocket != null) {
+	/*
+	 * Close the socket before exiting application
+	 */
+	public void closeSocket() {
+	    if (serverSocket != null) {
             serverSocket.close();
+            serverSocket = null;
         }
-    }
+	}
 
-    /*
-     * If the socket is OK, then it's running
-     */
-    boolean socketIsOK() {
-        return socketOK;
-    }
+	/*
+	 * If the socket is OK, then it's running
+	 */
+	boolean socketIsOK() {
+		return socketOK;
+	}
 
-    @Override
     public void onDestroy() {
         super.onDestroy();
+        chatDbAdapter.close();
         closeSocket();
-    }
-
-    private void addPeer(Peer peer) {
-        for (Peer p : peers) {
-            if (p.name.equals(peer.name)) {
-                return;
-            }
-        }
-        peers.add(peer);
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         super.onCreateOptionsMenu(menu);
         // TODO inflate a menu with PEERS option
-        getMenuInflater().inflate(R.menu.chatserver_menu, menu);
-        return true;
 
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.chatserver_menu, menu);
+        return true;
     }
 
     @Override
@@ -225,17 +218,13 @@ public class ChatServer extends Activity implements OnClickListener {
 
             case R.id.peers:
                 // TODO PEERS provide the UI for viewing list of peers
-                // Send the list of peers to the subactivity as a parcelable list
                 Intent intent = new Intent(this, ViewPeersActivity.class);
-                intent.putExtra("peers", peers);
                 startActivity(intent);
                 break;
 
             default:
-                return super.onOptionsItemSelected(item);
         }
         return false;
     }
-
 
 }

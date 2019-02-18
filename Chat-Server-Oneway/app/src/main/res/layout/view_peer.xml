@@ -34,14 +34,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <TextView
+    <ListView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/view_port" />
-
-    <TextView
-        android:id="@+id/view_port"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_weight="1"
+        android:layout_height="0dp"/>
 
 </LinearLayout>
