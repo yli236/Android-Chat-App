@@ -156,6 +156,8 @@ public class ChatServer extends Activity implements OnClickListener {
             newPeer.timestamp = new Date();
             newPeer.address = sourceIPAddress;
             chatDbAdapter.persist(newPeer);
+            //Log.i("Presentation: " +);
+            message.senderId = newPeer.id;
             chatDbAdapter.persist(message);
             Cursor messageCursor = chatDbAdapter.fetchAllMessages();
             String [] from = new String[]{MessageContract.SENDER, MessageContract.MESSAGE_TEXT};

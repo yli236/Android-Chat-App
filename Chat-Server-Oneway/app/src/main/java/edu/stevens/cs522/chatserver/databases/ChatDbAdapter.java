@@ -44,14 +44,14 @@ public class ChatDbAdapter {
         public void onCreate(SQLiteDatabase db) {
             // CREATING PEER TABLE
             db.execSQL("CREATE TABLE " + PEER_TABLE
-                    + "(" + PeerContract._ID + " INTEGER PRIMARY KEY AUTOINCREMENT , "
+                    + "(" + PeerContract._ID + " INTEGER PRIMARY KEY , "
                     + PeerContract.NAME + " TEXT NOT NULL, "
                     + PeerContract.ADDRESS + " TEXT NOT NULL, "
                     + PeerContract.TIMESTAMP + " INTEGER NOT NULL)");
 
             // CREATEING MESSAGE TABLE
             db.execSQL("CREATE TABLE " + MESSAGE_TABLE
-             + "(" + MessageContract._ID + " INTEGER PRIMARY KEY AUTOINCREMENT , "
+             + "(" + MessageContract._ID + " INTEGER PRIMARY KEY , "
              + MessageContract.MESSAGE_TEXT + " TEXT NOT NULL, "
              + MessageContract.TIMESTAMP + " INTEGER NOT NULL, "
              + MessageContract.SENDER + " TEXT NOT NULL, "
@@ -130,12 +130,12 @@ public class ChatDbAdapter {
 
     public long persist(Message message) throws SQLException {
         // TODO
-        Long messageId = 0L;
+
+        Log.i("senderID:  ", Long.toString(message.senderId));
         ContentValues messageContent = new ContentValues();
         message.writeToProvider(messageContent);
-        messageId = db.insert(MESSAGE_TABLE, null, messageContent);
-        message.id = messageId;
-        return messageId;
+        return db.insert(MESSAGE_TABLE, null, messageContent);
+
     }
 
     /**
@@ -153,13 +153,17 @@ public class ChatDbAdapter {
             // if not exist, insert a new row
             peerId = db.insert(PEER_TABLE, null, peerContent);
             peer.id = peerId;
+            peer.writeToProvider(peerContent);
             Log.i("Inserted", peer.name + " inserted with id: " + peer.id );
         }
         else {
-            String where = PeerContract._ID + " =? ";
-            String[] whereArgs = new String[]{Long.toString(peer.id)};
+            peer.id = PeerContract.getId(cursor);
+            String where = PeerContract.NAME + " =? ";
+            String[] whereArgs = new String[]{peer.name};
+
             int num = db.update(PEER_TABLE, peerContent, where, whereArgs);
-            Log.i("UPDATING PEER", "Number of rows affected: " + num + "inserted peer id: " + peer.id);
+
+            Log.i("UPDATING PEER", "Number of rows affected: " + num + "Already inserted peer id: " + peer.id);
         }
         return peer.id;
     }
